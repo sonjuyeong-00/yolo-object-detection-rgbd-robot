@@ -138,7 +138,7 @@ colcon build --symlink-install
 source install/setup.bash
 
 #RealSense 카메라를 실행합니다.
-ros2 launch realsense2_camera rs_camera.launch.py
+ros2 launch realsense2_camera rs_launch.py
 
 # YOLO 노드를 실행합니다.
 ros2 run yolo_rs yolo_node
