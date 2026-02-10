@@ -20,7 +20,7 @@ class YoloNode(Node):
         self.bridge = CvBridge()
 
         # 학습된 모델 경로
-        self.model = YOLO('/home/sson/ros2_ws/src/yolo_rs/dataset/runs/detect/train/weights/best.pt')
+        self.model = YOLO('/home/sson/ros2_ws/src/yolo_rs/best.pt')
 
         # Topics
         self.color_topic = '/camera/camera/color/image_raw'
