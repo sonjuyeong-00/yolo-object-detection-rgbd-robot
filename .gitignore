@@ -1,0 +1,14 @@
+# ROS2 / colcon
+build/
+install/
+log/
+
+# Datasets and training outputs
+dataset/
+
+# Python
+__pycache__/
+*.pyc
+
+# Model weights
+*.pt
