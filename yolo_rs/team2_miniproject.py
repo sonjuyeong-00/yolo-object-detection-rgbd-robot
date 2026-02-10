@@ -1,21 +1,12 @@
-import cv2
 import rclpy
 from rclpy.node import Node
-import pyrealsense2 as rs
-import numpy as np
 import time
 
-from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PointStamped
 from std_msgs.msg import Float32
-from cv_bridge import CvBridge, CvBridgeError
-import message_filters
 
 import DR_init
 from yolo_rs.gripper_drl_controller import GripperController
-from rclpy.duration import Duration
-from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
-from tf2_geometry_msgs import do_transform_point
 
 #--------------------------sys
 import threading
@@ -28,19 +19,14 @@ VELOCITY, ACC = 100, 100
 
 #--------------------------sys
 # move reaction
-DR_MV_RA_NONE      = 0
 DR_MV_RA_DUPLICATE = 0
-DR_MV_RA_OVERRIDE  = 1
 
 GRIPPER_GRAB_POS = 300
-GRIPPER_RELEASE_POS = 100
 
 # RH-P12-RN 기준(대략): 스트로크 0~106mm, Goal Position 0~1150
 GRIPPER_STROKE_MAX_MM = 106.0
 GRIPPER_PULSE_MAX = 1150
 GRIPPER_GRAB_MARGIN_MM = 2.0     # 물체 폭보다 조금 더 닫기
-GRIPPER_RELEASE_MARGIN_MM = 10.0 # 놓을 때 더 열기
-GRIPPER_PLACE_UP_EXTRA_MM = 5.0  # 플레이스 업 전 추가로 살짝 열기
 
 # 카메라 좌표 -> 로봇 좌표 보정 (필요 시 현장에 맞게 수정)
 # 입력: 카메라 좌표계(mm). 출력: 로봇 좌표계(mm)
@@ -64,39 +50,7 @@ class RobotControllerNode(Node):
     def __init__(self):
         super().__init__("robot_controller_node")
 
-        
         self.get_logger().info("ROS 2 구독자 설정을 시작합니다.")
-        
-        """
-        self.bridge = CvBridge()
-
-        self.intrinsics = None
-        self.latest_cv_color = None
-        self.latest_cv_depth_mm = None
-
-        self.color_sub = message_filters.Subscriber(
-            self, Image, '/camera/camera/color/image_raw'
-        )
-        self.depth_sub = message_filters.Subscriber(
-            self, Image, '/camera/camera/aligned_depth_to_color/image_raw'
-            #self, Image, '/camera/camera/depth/image_rect_raw'
-        )
-        self.info_sub = message_filters.Subscriber(
-            self, CameraInfo, '/camera/camera/aligned_depth_to_color/camera_info'
-            #self, CameraInfo, '/camera/camera/depth/camera_info'
-        )
-
-        self.ts = message_filters.ApproximateTimeSynchronizer(
-            [self.color_sub, self.depth_sub, self.info_sub], 
-            queue_size=10, 
-            slop=0.1
-        )
-        self.ts.registerCallback(self.synced_callback)
-        
-        
-        self.get_logger().info("컬러/뎁스/카메라정보 토픽 구독 대기 중...")
-        self.get_logger().info("화면이 나오지 않으면 Launch 명령어를 확인하세요.")
-        """
         
         self.gripper = None
         try:
@@ -133,42 +87,6 @@ class RobotControllerNode(Node):
         self.last_selected_msg_time = None
         self.selection_reset_sec = 0.5
 
-        # TF2 buffer/listener for camera -> robot base transform
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.target_frame = "base_link"
-
-    def synced_callback(self, color_msg, depth_msg, info_msg):
-        """
-        try:
-            self.latest_cv_color = self.bridge.imgmsg_to_cv2(color_msg, "bgr8")
-            self.latest_cv_depth_mm = self.bridge.imgmsg_to_cv2(depth_msg, "16UC1")
-        
-        except CvBridgeError as e:
-            self.get_logger().error(f"CV Bridge 변환 오류: {e}")
-            return
-
-        if self.intrinsics is None:
-            self.intrinsics = rs.intrinsics()
-            self.intrinsics.width = info_msg.width
-            self.intrinsics.height = info_msg.height
-            self.intrinsics.ppx = info_msg.k[2]
-            self.intrinsics.ppy = info_msg.k[5]
-            self.intrinsics.fx = info_msg.k[0]
-            self.intrinsics.fy = info_msg.k[4]
-            
-            if info_msg.distortion_model == 'plumb_bob' or info_msg.distortion_model == 'rational_polynomial':
-                self.intrinsics.model = rs.distortion.brown_conrady
-            else:
-                self.intrinsics.model = rs.distortion.none
-            
-            self.intrinsics.coeffs = list(info_msg.d)
-            self.get_logger().info("카메라 내장 파라미터(Intrinsics) 수신 완료.")
-        """
-
-    def stop_camera(self):
-        pass
-
     def terminate_gripper(self):
         if self.gripper:
             self.gripper.terminate()
@@ -190,44 +108,6 @@ class RobotControllerNode(Node):
         pulse = max(0, min(pulse, GRIPPER_PULSE_MAX))
         return pulse
 
-    def mouse_callback(self, event, u, v, flags, param):
-        """
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if self.latest_cv_depth_mm is None or self.intrinsics is None:
-                self.get_logger().warn("아직 뎁스 프레임 또는 카메라 정보가 수신되지 않았습니다.")
-                return
-
-            try:
-                depth_mm = self.latest_cv_depth_mm[v, u]
-            except IndexError:
-                self.get_logger().warn(f"클릭 좌표(u={u}, v={v})가 이미지 범위를 벗어났습니다.")
-                return
-            
-            if depth_mm == 0:
-                print(f"({u}, {v}) 지점의 깊이를 측정할 수 없습니다 (값: 0).")
-                return
-
-            depth_m = float(depth_mm) / 1000.0
-
-            point_3d = rs.rs2_deproject_pixel_to_point(self.intrinsics, [u, v], depth_m)
-
-            x_mm = point_3d[1] * 1000
-            y_mm = point_3d[0] * 1000
-            z_mm = point_3d[2] * 1000
-
-            final_x = 620 + x_mm
-            final_y = y_mm
-            final_z = 950 - z_mm
-            if(final_z <= 110):
-                final_z = 110
-
-            print("--- 변환된 최종 3D 좌표 ---")
-            print(f"픽셀 좌표: (u={u}, v={v}), Depth: {depth_m*1000:.1f} mm")
-            print(f"로봇 목표 좌표: X={final_x:.1f}, Y={final_y:.1f}, Z={final_z:.1f}\n")
-
-            self.pick_move_robot_and_control_gripper(final_x, final_y, final_z)
-            print("=" * 50)
-        """
 
     def pick_move_robot_and_control_gripper(self, x, y, z, width=None, depth=None):
         from DSR_ROBOT2 import get_current_posx, movel, wait, movej
@@ -367,21 +247,12 @@ def main(args=None):
         return
 
    
-    
-    # OpenCV 카메라 화면 생성 및 마우스 콜백처리 
-    """
-    cv2.namedWindow("RealSense Camera")
-    cv2.setMouseCallback("RealSense Camera", robot_controller.mouse_callback)
-    print("카메라 영상에서 원하는 지점을 클릭하세요. 'ESC' 키를 누르면 종료됩니다.")
-    """
-    
     # sys / 사용자 입력대기 (0~10) - 필요 시 사용
     cmd_q = queue.Queue(maxsize=1)
     busy_event = threading.Event()
     t_in = threading.Thread(target=input_thread_fn, args=(cmd_q, busy_event), daemon=True)
     t_in.start()
 
-    busy = False
     try:
         while rclpy.ok():
             # 콜백 처리
@@ -406,38 +277,7 @@ def main(args=None):
                 busy_event.set()
                 robot_controller.selection_consumed = True
                 try:
-                    # TF로 camera frame -> base_link 변환 (m -> mm)
-                    try:
-                        tfm = robot_controller.tf_buffer.lookup_transform(
-                            robot_controller.target_frame,
-                            sp.header.frame_id,
-                            sp.header.stamp,
-                            timeout=Duration(seconds=0.5),
-                        )
-                        sp_base = do_transform_point(sp, tfm)
-                        x_mm = sp_base.point.x * 1000.0
-                        y_mm = sp_base.point.y * 1000.0
-                        z_mm = sp_base.point.z * 1000.0
-                        final_x, final_y, final_z = x_mm, y_mm, z_mm
-                        robot_controller.get_logger().info(
-                            f"TF 변환 OK: {sp.header.frame_id} -> {robot_controller.target_frame} | "
-                            f"XYZ(mm)=({final_x:.1f}, {final_y:.1f}, {final_z:.1f})"
-                        )
-                    except (LookupException, ConnectivityException, ExtrapolationException) as e:
-                        # TF 실패 시 기존 오프셋 방식으로 fallback
-                        robot_controller.get_logger().warn(
-                            f"TF 변환 실패({e}); 오프셋 보정으로 fallback 합니다."
-                        )
-                        x_mm = sp.point.x * 1000.0
-                        y_mm = sp.point.y * 1000.0
-                        z_mm = sp.point.z * 1000.0
-                        # 카메라->로봇 축 매핑: X<-Y, Y<-X, Z<- -Z
-                        final_x = CAM_TO_ROBOT_OFFSET_X_MM + (CAM_TO_ROBOT_SIGN_X * y_mm)
-                        final_y = CAM_TO_ROBOT_OFFSET_Y_MM + (CAM_TO_ROBOT_SIGN_Y * x_mm)
-                        final_z = CAM_TO_ROBOT_OFFSET_Z_MM + (CAM_TO_ROBOT_SIGN_Z * z_mm)
-
-                    if final_z <= 110.0:
-                        final_z = 110.0
+                    final_x, final_y, final_z = camera_point_to_robot_mm(sp)
 
                     robot_controller.pick_move_robot_and_control_gripper(
                         final_x, final_y, final_z, robot_controller.latest_selected_width, None
