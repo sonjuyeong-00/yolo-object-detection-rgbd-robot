@@ -85,7 +85,7 @@ flowchart TD
     G --> H[다음 대상 처리]
 ```
 ## System Architecture(rqt_graph)
-![시스템 아키텍처](image/Screenshot%20from%202026-02-10%2016-19-20.png)
+![시스템 아키텍처](image/rosgraph.png)
 
 ---
 ---
