@@ -72,6 +72,8 @@
 ---
 
 # 프로젝트 흐름도
+
+## Flow Chart
 ```mermaid
 flowchart TD
     A[사용자 입력] --> B[대상 물체 선택]
@@ -82,6 +84,8 @@ flowchart TD
     F --> G[지정 위치 적재]
     G --> H[다음 대상 처리]
 ```
+## System Architecture(rqt_graph)
+![시스템 아키텍처](image/Screenshot%20from%202026-02-10%2016-19-20.png)
 
 ---
 ---
@@ -118,6 +122,8 @@ yolo_rs/
 - 전처리: train/valid/test 분할(80:10:10), 라벨 검수
 - 학습: YOLOv8 학습 설정(eochs: 50, batch: 16)
 - 결과: `best.pt` 저장 및 추론 적용
+
+![데이터 파이프라인](image/IMG_0377.jpg.png)
 
 ---
 ---
