@@ -43,6 +43,18 @@ PLACE_Y_MM = 200.0
 PLACE_Z_MM = 250.0
 #--------------------------sys
 
+def camera_point_to_robot_mm(sp: PointStamped):
+    """카메라 좌표(PointStamped, m)를 로봇 좌표(mm)로 변환."""
+    x_mm = sp.point.x * 1000.0
+    y_mm = sp.point.y * 1000.0
+    z_mm = sp.point.z * 1000.0
+    final_x = CAM_TO_ROBOT_OFFSET_X_MM + (CAM_TO_ROBOT_SIGN_X * y_mm)
+    final_y = CAM_TO_ROBOT_OFFSET_Y_MM + (CAM_TO_ROBOT_SIGN_Y * x_mm)
+    final_z = CAM_TO_ROBOT_OFFSET_Z_MM + (CAM_TO_ROBOT_SIGN_Z * z_mm)
+    if final_z <= 110.0:
+        final_z = 110.0
+    return final_x, final_y, final_z
+
 DR_init.__dsr__id = ROBOT_ID
 DR_init.__dsr__model = ROBOT_MODEL
 
@@ -176,7 +188,6 @@ class RobotControllerNode(Node):
 
             self.get_logger().info("초기 자세로 복귀합니다.")
             movej(p_start, VELOCITY, ACC)
-            self.gripper.move(0)
             
             wait(0.5)
             return True
@@ -246,7 +257,10 @@ def main(args=None):
             rclpy.shutdown()
         return
 
-   
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(robot_controller)
+    executor.add_node(dsr_node)
+
     # sys / 사용자 입력대기 (0~10) - 필요 시 사용
     cmd_q = queue.Queue(maxsize=1)
     busy_event = threading.Event()
@@ -256,8 +270,7 @@ def main(args=None):
     try:
         while rclpy.ok():
             # 콜백 처리
-            rclpy.spin_once(robot_controller, timeout_sec=0.001)
-            rclpy.spin_once(dsr_node, timeout_sec=0.001)
+            executor.spin_once(timeout_sec=0.01)
 
             now = robot_controller.get_clock().now()
             if robot_controller.selection_consumed and robot_controller.last_selected_msg_time is not None:
@@ -292,7 +305,6 @@ def main(args=None):
             try:
                 cmd, val = cmd_q.get_nowait()
             except queue.Empty:
-                time.sleep(0.001)
                 continue
 
             # 종료
@@ -336,8 +348,7 @@ def main(args=None):
                 robot_controller.terminate_gripper()
                 # 응답 처리 기회 주기
                 for _ in range(50):
-                    rclpy.spin_once(robot_controller, timeout_sec=0.01)
-                    rclpy.spin_once(dsr_node, timeout_sec=0.01)
+                    executor.spin_once(timeout_sec=0.01)
             else:
                 print("ROS 컨텍스트가 이미 종료되어 그리퍼 terminate를 생략합니다.")
         except Exception as e:
